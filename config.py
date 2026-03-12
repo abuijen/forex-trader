@@ -1,0 +1,13 @@
+SYMBOLS = ["EURUSD","GBPUSD","USDJPY"]
+
+TIMEFRAME = 5  # minutes
+
+RISK_PERCENT = 1
+MAX_TRADES_PER_PAIR = 2
+
+MODEL_FILE = "model.pkl"
+
+SPREAD_LIMIT = 20
+ATR_SL_MULT = 1.5
+ATR_TP_MULT = 2.5
+BRIDGE_URL = "http://localhost:5000"  # Update this with your bridge IP
