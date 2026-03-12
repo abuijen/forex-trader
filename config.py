@@ -10,4 +10,3 @@ MODEL_FILE = "model.pkl"
 SPREAD_LIMIT = 20
 ATR_SL_MULT = 1.5
 ATR_TP_MULT = 2.5
-BRIDGE_URL = "http://localhost:5000"  # Update this with your bridge IP

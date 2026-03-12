@@ -1,17 +1,8 @@
-import requests
+import MetaTrader5 as mt5
 import pandas as pd
-from config import BRIDGE_URL
 
 def get_data(symbol, timeframe, bars=1000):
-    params = {
-        "action": "copy_rates",
-        "symbol": symbol,
-        "timeframe": timeframe,
-        "count": bars
-    }
-    response = requests.get(f"{BRIDGE_URL}/data", params=params)
-    data = response.json()
-    
-    df = pd.DataFrame(data)
+    rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, bars)
+    df = pd.DataFrame(rates)
     df["time"] = pd.to_datetime(df["time"], unit="s")
     return df
