@@ -9,7 +9,7 @@ MT5_PASSWORD = ""
 MT5_SERVER   = ""
 
 # ── Symbols & Timeframe ───────────────────────
-SYMBOLS   = ["EURUSD", "GBPUSD", "USDJPY", "USDCHF", "EURCHF", "XTIUSD","BTCUSD","ETHUSD"]
+SYMBOLS   = ["EURUSD", "GBPUSD", "USDJPY", "USDCHF", "EURCHF"]
 # SYMBOLS are Gold-USD, Gold-EUR, OIL-USD, BTC-USD, ETH-USD
 # Reserve SYMBOLS = ["EURUSD", "GBPUSD", "USDJPY", "USDCHF", "EURCHF", "XAUUSD", "XAUEUR","XTIUSD"]
 TIMEFRAME = 5           # minutes (M5)
@@ -28,7 +28,7 @@ ATR_TP_MULT = 2.5
 # ── ML Model ────────────────────────────────
 MODEL_FILE        = "model.pkl"
 TRAIN_BARS        = 5000    # bars used for initial training
-RETRAIN_INTERVAL  = 24      # hours between automatic retrains
+RETRAIN_INTERVAL  = 4      # hours between automatic retrains
 MIN_SIGNAL_PROB   = 0.55    # minimum predicted probability to act on a signal
 N_ESTIMATORS      = 1000    # Random Forest trees
 RF_MAX_DEPTH      = 10
