@@ -56,3 +56,16 @@ TRAILING_SL_STEP_PCT      = 0.01     # % step to trail after trigger
 # ── ATR Trailing Stop ─────────────────────────
 ENABLE_ATR_TRAILING       = False
 ATR_TRAILING_MULT         = 2.0      # ATR multiplier for trailing stop
+
+# ── Trading Time Constraints ──────────────────
+# Times are based on MT5 Server Time
+TRADE_START_HOUR  = 0     # Start trading again at Midnight
+TRADE_STOP_HOUR   = 20    # No new trades after 8 PM
+CLOSE_PROFIT_HOUR = 23    # Close winning trades after 11 PM
+CLOSE_ALL_HOUR    = 23    # Close all trades hour
+CLOSE_ALL_MINUTE  = 30    # Close all trades at 11:30 PM
+
+# ── Daily Profit Target ───────────────────────
+DAILY_PROFIT_TARGET_PCT = 15.0  # Stop trading if daily profit > 15%
+PROFIT_LOCK_THRESH      = 20.0  # Lock in profits above $20
+PROFIT_LOCK_TP_TARGET   = 20.0  # Set TP to $20 profit for others

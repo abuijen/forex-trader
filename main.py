@@ -17,11 +17,13 @@ import MetaTrader5 as mt5
 from config import (
     MT5_PATH, SYMBOLS, TRAIN_BARS, TIMEFRAME,
     RETRAIN_INTERVAL, ATR_SL_MULT, ATR_TP_MULT,
+    TRADE_START_HOUR, TRADE_STOP_HOUR,
+    DAILY_PROFIT_TARGET_PCT
 )
 from data.data_feed import get_data
 from strategy.ml_strategy import create_features, MLModel
 from risk.risk_manager import lot_size
-from execution.mt5_executor import send_trade, manage_trailing_stops
+from execution.mt5_executor import send_trade, manage_trailing_stops, manage_time_based_closes, lock_in_profits
 from execution.trade_sync import sync_closed_trades
 
 
@@ -90,18 +92,77 @@ def run() -> None:
         train_model(model)
 
     next_retrain = datetime.now(timezone.utc) + timedelta(hours=RETRAIN_INTERVAL)
+    
+    # Track midnight retraining using server date
+    server_info = mt5.symbol_info_tick(SYMBOLS[0])
+    last_daily_retrain = datetime.fromtimestamp(server_info.time).date() if server_info else datetime.now().date()
+    
+    # Track daily profit target
+    account = mt5.account_info()
+    start_day_capital = account.balance if account else 0
+    target_hit_today = False
 
     print("[main] Bot started. Press Ctrl+C to stop.\n")
 
     while True:
         try:
+            # Fetch server time at start of loop to avoid scope errors
+            tick0 = mt5.symbol_info_tick(SYMBOLS[0])
+            if not tick0:
+                time.sleep(1)
+                continue
+            server_time = datetime.fromtimestamp(tick0.time)
+
             # ── Periodic retraining ────────────────────────────────────────
             if datetime.now(timezone.utc) >= next_retrain:
                 train_model(model)
                 next_retrain = datetime.now(timezone.utc) + timedelta(hours=RETRAIN_INTERVAL)
 
+            # ── Midnight Retraining & Capital Reset ────────────────────────
+            if server_time.date() > last_daily_retrain:
+                print(f"[main] Midnight reached ({server_time.date()}).")
+                train_model(model)
+                last_daily_retrain = server_time.date()
+                next_retrain = datetime.now(timezone.utc) + timedelta(hours=RETRAIN_INTERVAL)
+                
+                # Reset daily capital tracking
+                account = mt5.account_info()
+                start_day_capital = account.balance if account else start_day_capital
+                target_hit_today = False
+                print(f"[main] Daily capital reset to {start_day_capital:.2f}")
+
+            # ── Daily Profit Target Check ──────────────────────────────────
+            account = mt5.account_info()
+            if account and not target_hit_today:
+                # current equity includes open trades
+                current_profit = account.equity - start_day_capital
+                profit_pct = (current_profit / start_day_capital * 100) if start_day_capital > 0 else 0
+                
+                if profit_pct >= DAILY_PROFIT_TARGET_PCT:
+                    print(f"🎯 [main] DAILY TARGET HIT: {profit_pct:.2f}% profit reached (${current_profit:.2f})")
+                    lock_in_profits()
+                    target_hit_today = True
+
             # ── Signal scanning ───────────────────────────────────────────
-            tf = get_mt5_timeframe(TIMEFRAME)
+            # Weekend restriction: No trading on Saturday (5) or Sunday (6)
+            is_weekend = server_time.weekday() >= 5
+            
+            in_window = False
+            if not is_weekend:
+                if TRADE_START_HOUR < TRADE_STOP_HOUR:
+                    in_window = TRADE_START_HOUR <= server_time.hour < TRADE_STOP_HOUR
+                else: # Overnight window
+                    in_window = server_time.hour >= TRADE_START_HOUR or server_time.hour < TRADE_STOP_HOUR
+
+            if target_hit_today:
+                 # Already locked in, skip news signals
+                 pass
+            elif is_weekend:
+                print(f"[main] Server time {server_time.strftime('%A %H:%M')}. Weekend - No trading.")
+            elif not in_window:
+                print(f"[main] Server time {server_time.strftime('%H:%M')} is outside trading window ({TRADE_START_HOUR:02}:00 - {TRADE_STOP_HOUR:02}:00). Skipping signal scanning.")
+            else:
+                tf = get_mt5_timeframe(TIMEFRAME)
             for symbol in SYMBOLS:
                 df = get_data(symbol, tf, bars=500)
                 if df.empty:
@@ -155,6 +216,11 @@ def run() -> None:
 
         # Manage active trailing stops
         manage_trailing_stops()
+        
+        # Manage time-based closes (Server Time)
+        server_info = mt5.symbol_info_tick(SYMBOLS[0])
+        if server_info:
+            manage_time_based_closes(datetime.fromtimestamp(server_info.time))
 
         time.sleep(30)  # scan every 30 seconds
 

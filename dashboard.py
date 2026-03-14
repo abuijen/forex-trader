@@ -152,46 +152,81 @@ def load_trade_log() -> pd.DataFrame:
 
 
 def compute_stats(df: pd.DataFrame) -> dict:
-    """Calculate Win Rate and realized P&L from MT5 history for Bot Magic 202400."""
+    """Calculate Win Rate, realized P&L, and Daily Stats from MT5 history."""
     total_orders = len(df[df["retcode"] == 10009]) if not df.empty else 0
     
+    defaults = {
+        "total": total_orders, "wins": 0, "win_rate": 0.0, "pnl": 0.0,
+        "daily_pnl_closed": 0.0, "daily_pnl_total": 0.0, "daily_pnl_pct": 0.0
+    }
+
     if not connect_mt5():
-        return {"total": total_orders, "wins": 0, "win_rate": 0.0, "pnl": 0.0}
+        return defaults
     
-    # Get last 7 days of deals; use future to_date for timezone safety
+    # ── 1. General Stats (Last 7 Days) ────────────────────────────────────
     from_date = datetime.now() - timedelta(days=7)
     to_date   = datetime.now() + timedelta(days=1)
     deals = mt5.history_deals_get(from_date, to_date)
     
     if not deals:
-        return {"total": total_orders, "wins": 0, "win_rate": 0.0, "pnl": 0.0}
+        return defaults
         
-    # 1. Find all bot positions by entry deals (DEAL_ENTRY_IN)
     bot_pos_ids = set()
-    for d in deals:
-        if d.magic == 202400 and d.entry == 0: # DEAL_ENTRY_IN
-            bot_pos_ids.add(d.position_id)
-            
-    # 2. Sum profit from all exit deals (DEAL_ENTRY_OUT) for those positions
-    wins = 0
     total_pnl = 0.0
+    wins = 0
     closed_count = 0
     
     for d in deals:
-        if d.position_id in bot_pos_ids and d.entry == 1: # DEAL_ENTRY_OUT
+        if d.magic == 202400 and d.entry == 0: bot_pos_ids.add(d.position_id)
+    
+    for d in deals:
+        if d.position_id in bot_pos_ids and d.entry == 1:
             profit = d.profit + d.commission + d.swap
             total_pnl += profit
             closed_count += 1
-            if profit > 0:
-                wins += 1
+            if profit > 0: wins += 1
                 
     win_rate = (wins / closed_count * 100) if closed_count > 0 else 0.0
+    
+    # ── 2. Daily Stats (Since Midnight) ───────────────────────────────────
+    # We use server time for midnight
+    tick0 = mt5.symbol_info_tick(SYMBOLS[0])
+    if tick0:
+        server_dt = datetime.fromtimestamp(tick0.time)
+        midnight = server_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+    else:
+        midnight = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+
+    daily_pnl_closed = 0.0
+    for d in deals:
+        # deal time is timestamp
+        d_time = datetime.fromtimestamp(d.time)
+        if d.position_id in bot_pos_ids and d.entry == 1 and d_time >= midnight:
+            daily_pnl_closed += (d.profit + d.commission + d.swap)
+
+    # Open P&L
+    open_positions = mt5.positions_get(magic=202400)
+    open_pnl = sum(p.profit for p in open_positions) if open_positions else 0.0
+    
+    daily_pnl_total = daily_pnl_closed + open_pnl
+    
+    # Estimate start of day capital
+    account = mt5.account_info()
+    if account:
+        # Start capital = current equity - daily total pnl
+        start_day_capital = account.equity - daily_pnl_total
+        daily_pnl_pct = (daily_pnl_total / start_day_capital * 100) if start_day_capital > 0 else 0.0
+    else:
+        daily_pnl_pct = 0.0
     
     return {
         "total": total_orders,
         "wins": wins,
         "win_rate": round(win_rate, 1),
-        "pnl": round(total_pnl, 2)
+        "pnl": round(total_pnl, 2),
+        "daily_pnl_closed": round(daily_pnl_closed, 2),
+        "daily_pnl_total":  round(daily_pnl_total, 2),
+        "daily_pnl_pct":    round(daily_pnl_pct, 2)
     }
 
 
@@ -233,28 +268,43 @@ stats   = compute_stats(trades)
 open_pos = get_open_positions()
 
 # ── Top Metric Row ────────────────────────────────────────────────────────────
-c1, c2, c3, c4, c5 = st.columns(5)
+c1, c2, c3, c4 = st.columns(4)
 
 balance  = f"${account.balance:,.2f}"  if account else "–"
 equity   = f"${account.equity:,.2f}"   if account else "–"
-pnl_val  = stats["pnl"]
-pnl_str  = f"${pnl_val:,.2f}"
-pnl_cls  = "pos" if pnl_val >= 0 else "neg"
-
 connected = "🟢 Connected" if account else "🔴 Offline"
-total_trades = stats["total"]
-win_rate_str = f"{stats['win_rate']}%"
+total_orders = stats["total"]
 
 for col, label, value, cls in [
     (c1, "MT5 Status",   connected,    ""),
     (c2, "Balance",      balance,       "pos"),
-    (c3, "Realized P&L", pnl_str,       pnl_cls),
-    (c4, "Total Orders", total_trades,  ""),
-    (c5, "Win Rate",     win_rate_str,  "pos"),
+    (c3, "Equity",       equity,        "pos"),
+    (c4, "Total Orders", total_orders,  ""),
 ]:
-
     col.markdown(f"""
     <div class="metric-card">
+        <h3>{label}</h3>
+        <p class="{cls}">{value}</p>
+    </div>""", unsafe_allow_html=True)
+
+st.markdown("<br>", unsafe_allow_html=True)
+
+# ── Daily Metric Row ──────────────────────────────────────────────────────────
+d1, d2, d3, d4 = st.columns(4)
+
+daily_closed = stats["daily_pnl_closed"]
+daily_total  = stats["daily_pnl_total"]
+daily_pct    = stats["daily_pnl_pct"]
+win_rate     = f"{stats['win_rate']}%"
+
+for col, label, value, cls in [
+    (d1, "Daily P&L (Closed)", f"${daily_closed:,.2f}", "pos" if daily_closed >= 0 else "neg"),
+    (d2, "Daily P&L (Total)",  f"${daily_total:,.2f}",  "pos" if daily_total >= 0 else "neg"),
+    (d3, "Daily P&L %",        f"{daily_pct:,.2f}%",    "pos" if daily_pct >= 0 else "neg"),
+    (d4, "Bot Win Rate",       win_rate,                "pos"),
+]:
+    col.markdown(f"""
+    <div class="metric-card" style="border-top: 2px solid #7c3aed;">
         <h3>{label}</h3>
         <p class="{cls}">{value}</p>
     </div>""", unsafe_allow_html=True)

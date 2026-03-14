@@ -211,3 +211,132 @@ def manage_trailing_stops():
                 else:
                     rc = res.retcode if res else "None"
                     print(f"[executor] Failed to update Trailing SL for #{p.ticket}: {rc}")
+
+
+def close_position(position, tick):
+    type_dict = {
+        mt5.POSITION_TYPE_BUY: mt5.ORDER_TYPE_SELL,
+        mt5.POSITION_TYPE_SELL: mt5.ORDER_TYPE_BUY
+    }
+    order_type = type_dict[position.type]
+    price = tick.bid if order_type == mt5.ORDER_TYPE_SELL else tick.ask
+    
+    filling = _get_filling_mode(position.symbol)
+    
+    request = {
+        "action": mt5.TRADE_ACTION_DEAL,
+        "symbol": position.symbol,
+        "volume": position.volume,
+        "type": order_type,
+        "position": position.ticket,
+        "price": price,
+        "deviation": 20,
+        "magic": 202400,
+        "comment": "Time Close",
+        "type_time": mt5.ORDER_TIME_GTC,
+        "type_filling": filling,
+    }
+    result = mt5.order_send(request)
+    if result and result.retcode == mt5.TRADE_RETCODE_DONE:
+        print(f"[executor] Closed position #{position.ticket} ({position.symbol}) due to time logic. Profit: {position.profit}")
+    else:
+        rc = result.retcode if result else "None"
+        print(f"[executor] Failed to close position #{position.ticket}: {rc}")
+
+
+def manage_time_based_closes(server_time):
+    """
+    Close all trades in profit after 11 PM.
+    Close all trades at 11:30 PM.
+    """
+    hour = server_time.hour
+    minute = server_time.minute
+
+    # 1. Close all trades if >= 23:30
+    close_all = False
+    if hour == 23 and minute >= 30:
+        close_all = True
+    elif hour >= 24: # (Just in case)
+        pass
+    
+    # 2. Close profitable trades if >= 23:00 and < 23:30
+    close_profit = False
+    if hour == 23 and minute >= 0 and not close_all:
+        close_profit = True
+
+    if not close_all and not close_profit:
+        return
+
+    positions = mt5.positions_get(magic=202400)
+    if not positions:
+        return
+
+    for p in positions:
+        symbol = p.symbol
+        tick = mt5.symbol_info_tick(symbol)
+        if not tick:
+            continue
+            
+        should_close = False
+        if close_all:
+            should_close = True
+        elif close_profit and p.profit > 0:
+            should_close = True
+
+        if should_close:
+            close_position(p, tick)
+
+
+def lock_in_profits():
+    """
+    Called when daily 15% target is reached.
+    1. Close any position > $20 profit.
+    2. Set TP to +$20 profit for others.
+    """
+    from config import PROFIT_LOCK_THRESH, PROFIT_LOCK_TP_TARGET
+    
+    positions = mt5.positions_get(magic=202400)
+    if not positions:
+        return
+
+    for p in positions:
+        symbol = p.symbol
+        tick = mt5.symbol_info_tick(symbol)
+        if not tick:
+            continue
+            
+        if p.profit >= PROFIT_LOCK_THRESH:
+            print(f"[executor] Locking profit: Closing #{p.ticket} ({symbol}) with ${p.profit:.2f}")
+            close_position(p, tick)
+        else:
+            # Set TP to $20 profit
+            # Formula: Profit = (Price - Open) * Vol * TickValue / TickSize
+            # Price = Open + (TargetProfit * TickSize) / (Vol * TickValue)
+            info = mt5.symbol_info(symbol)
+            if info is None: continue
+            
+            direction = 1 if p.type == mt5.POSITION_TYPE_BUY else -1
+            
+            # Distance in price for $20 profit
+            # tick_value is profit for 1 lot for 1 tick_size change
+            # profit = (price_change / tick_size) * volume * tick_value
+            # price_change = (profit * tick_size) / (volume * tick_value)
+            
+            price_dist = (PROFIT_LOCK_TP_TARGET * info.trade_tick_size) / (p.volume * info.trade_tick_value)
+            new_tp = round(p.price_open + (direction * price_dist), info.digits)
+            
+            # Only update if new TP is better (tighter or exists) than current TP
+            # For simplicity, we always update to lock in exactly $20 if it's currently < $20
+            request = {
+                "action":   mt5.TRADE_ACTION_SLTP,
+                "symbol":   symbol,
+                "position": p.ticket,
+                "sl":       p.sl,
+                "tp":       new_tp,
+                "magic":    202400
+            }
+            res = mt5.order_send(request)
+            if res and res.retcode == mt5.TRADE_RETCODE_DONE:
+                print(f"[executor] Locking profit: TP updated for #{p.ticket} to target ${PROFIT_LOCK_TP_TARGET}")
+            else:
+                print(f"[executor] Failed to set lock-in TP for #{p.ticket}")
