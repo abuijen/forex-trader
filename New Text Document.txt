@@ -1,0 +1,6 @@
+Name     : rd
+Type     : Forex Hedged EUR
+Server   : MetaQuotes-Demo
+Login    : 104965548
+Password : H!E0FwXl
+Investor : GaX*N4Eb
