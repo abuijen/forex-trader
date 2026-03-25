@@ -1,6 +1,6 @@
 import unittest
 from unittest.mock import MagicMock, patch
-from datetime import datetime
+from datetime import datetime, timezone
 import sys
 import os
 
@@ -32,7 +32,7 @@ def run_diagnostic():
         return
 
     # server_dt is MT5's view. Local time is for comparison/reference.
-    server_dt = datetime.fromtimestamp(tick.time)
+    server_dt = datetime.fromtimestamp(tick.time, timezone.utc)
     print(f"✅ MT5 Server Time: {server_dt.strftime('%A, %Y-%m-%d %H:%M:%S')}")
     print(f"⌚ Local Time (PC): {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     

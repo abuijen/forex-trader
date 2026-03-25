@@ -9,14 +9,15 @@ Run with:
 
 import os
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
 import MetaTrader5 as mt5
 
-from config import LOG_FILE, MT5_PATH, DASHBOARD_UPDATE_INTERVAL, SYMBOLS
+from config import LOG_FILE, MT5_PATH, DASHBOARD_UPDATE_INTERVAL, SYMBOLS, PAPER_TRADING
+from execution.tester_launcher import launch_tester
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  Page config
@@ -192,15 +193,15 @@ def compute_stats(df: pd.DataFrame) -> dict:
     # We use server time for midnight
     tick0 = mt5.symbol_info_tick(SYMBOLS[0])
     if tick0:
-        server_dt = datetime.fromtimestamp(tick0.time)
+        server_dt = datetime.fromtimestamp(tick0.time, timezone.utc)
         midnight = server_dt.replace(hour=0, minute=0, second=0, microsecond=0)
     else:
-        midnight = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        midnight = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
 
     daily_pnl_closed = 0.0
     for d in deals:
         # deal time is timestamp
-        d_time = datetime.fromtimestamp(d.time)
+        d_time = datetime.fromtimestamp(d.time, timezone.utc)
         if d.position_id in bot_pos_ids and d.entry == 1 and d_time >= midnight:
             daily_pnl_closed += (d.profit + d.commission + d.swap)
 
@@ -239,6 +240,19 @@ st.sidebar.image(
     "https://img.icons8.com/color/96/combo-chart--v1.png", width=64
 )
 st.sidebar.title("⚙️ Controls")
+mode = st.sidebar.radio("Trading Mode", ["Live Trading", "Paper Trading (Tester)"], 
+                        index=1 if PAPER_TRADING else 0)
+
+if mode == "Paper Trading (Tester)":
+    st.sidebar.warning("Mode: Strategy Tester")
+    if st.sidebar.button("🚀 Launch MT5 Strategy Tester"):
+        if launch_tester():
+            st.sidebar.success("MT5 Launched!")
+        else:
+            st.sidebar.error("Failed to launch MT5.")
+else:
+    st.sidebar.success("Mode: Live Trading")
+
 refresh_rate = st.sidebar.slider("Refresh (s)", 3, 60, DASHBOARD_UPDATE_INTERVAL)
 selected_symbols = st.sidebar.multiselect("Symbols", SYMBOLS, default=SYMBOLS)
 st.sidebar.markdown("---")

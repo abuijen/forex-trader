@@ -10,10 +10,12 @@ main.py
 import sys
 import time
 import traceback
+import argparse
 from datetime import datetime, timedelta, timezone
 
 import MetaTrader5 as mt5
 
+import config
 from config import (
     MT5_PATH, SYMBOLS, TRAIN_BARS, TIMEFRAME,
     RETRAIN_INTERVAL, ATR_SL_MULT, ATR_TP_MULT,
@@ -84,6 +86,15 @@ def train_model(model: MLModel) -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def run() -> None:
+    parser = argparse.ArgumentParser(description="ML Forex Bot")
+    parser.add_argument("--tester", action="store_true", help="Run in Paper Trading (Tester) mode")
+    args = parser.parse_args()
+
+    # Override config if --tester is passed
+    if args.tester:
+        config.PAPER_TRADING = True
+        print("[main] --tester flag detected. Overriding PAPER_TRADING to True.")
+
     init_mt5()
 
     # Load or train the model
@@ -93,9 +104,17 @@ def run() -> None:
 
     next_retrain = datetime.now(timezone.utc) + timedelta(hours=RETRAIN_INTERVAL)
     
+    # Detect if running against a terminal
+    terminal = mt5.terminal_info()
+    if terminal:
+        print(f"[main] Connected to Terminal: {terminal.name} (Build {terminal.build})")
+    
+    mode_str = "PAPER TRADING (TESTER)" if config.PAPER_TRADING else "LIVE TRADING"
+    print(f"[main] Bot Mode: {mode_str}")
+
     # Track midnight retraining using server date
     server_info = mt5.symbol_info_tick(SYMBOLS[0])
-    last_daily_retrain = datetime.fromtimestamp(server_info.time).date() if server_info else datetime.now().date()
+    last_daily_retrain = datetime.fromtimestamp(server_info.time, timezone.utc).date() if server_info else datetime.now(timezone.utc).date()
     
     # Track daily profit target
     account = mt5.account_info()
@@ -111,7 +130,7 @@ def run() -> None:
             if not tick0:
                 time.sleep(1)
                 continue
-            server_time = datetime.fromtimestamp(tick0.time)
+            server_time = datetime.fromtimestamp(tick0.time, timezone.utc)
 
             # ── Periodic retraining ────────────────────────────────────────
             if datetime.now(timezone.utc) >= next_retrain:
@@ -163,45 +182,45 @@ def run() -> None:
                 print(f"[main] Server time {server_time.strftime('%H:%M')} is outside trading window ({TRADE_START_HOUR:02}:00 - {TRADE_STOP_HOUR:02}:00). Skipping signal scanning.")
             else:
                 tf = get_mt5_timeframe(TIMEFRAME)
-            for symbol in SYMBOLS:
-                df = get_data(symbol, tf, bars=500)
-                if df.empty:
-                    continue
+                for symbol in SYMBOLS:
+                    df = get_data(symbol, tf, bars=500)
+                    if df.empty:
+                        continue
 
-                df = create_features(df)
-                if df.empty or len(df) < 10:
-                    continue
+                    df = create_features(df)
+                    if df.empty or len(df) < 10:
+                        continue
 
-                signal, prob = model.predict(df)
+                    signal, prob = model.predict(df)
 
-                if signal is None:
-                    continue
+                    if signal is None:
+                        continue
 
-                last     = df.iloc[-1]
-                atr      = last["atr"]
-                tick     = mt5.symbol_info_tick(symbol)
-                if tick is None:
-                    continue
+                    last     = df.iloc[-1]
+                    atr      = last["atr"]
+                    tick     = mt5.symbol_info_tick(symbol)
+                    if tick is None:
+                        continue
 
-                sym_info = mt5.symbol_info(symbol)
-                point    = sym_info.point
+                    sym_info = mt5.symbol_info(symbol)
+                    point    = sym_info.point
 
-                if signal == "buy":
-                    price = tick.ask
-                    sl    = price - atr * ATR_SL_MULT
-                    tp    = price + atr * ATR_TP_MULT
-                else:
-                    price = tick.bid
-                    sl    = price + atr * ATR_SL_MULT
-                    tp    = price - atr * ATR_TP_MULT
+                    if signal == "buy":
+                        price = tick.ask
+                        sl    = price - atr * ATR_SL_MULT
+                        tp    = price + atr * ATR_TP_MULT
+                    else:
+                        price = tick.bid
+                        sl    = price + atr * ATR_SL_MULT
+                        tp    = price - atr * ATR_TP_MULT
 
-                sl_pips = abs(price - sl) / point / 10
-                lot     = lot_size(symbol, sl_pips)
+                    sl_pips = abs(price - sl) / point / 10
+                    lot     = lot_size(symbol, sl_pips)
 
-                print(f"[main] {symbol}  {signal.upper()}  prob={prob:.2f}  "
-                      f"lot={lot}  sl={sl:.5f}  tp={tp:.5f}")
+                    print(f"[main] {symbol}  {signal.upper()}  prob={prob:.2f}  "
+                          f"lot={lot}  sl={sl:.5f}  tp={tp:.5f}")
 
-                send_trade(symbol, signal, lot, sl, tp, prob)
+                    send_trade(symbol, signal, lot, sl, tp, prob)
 
         except KeyboardInterrupt:
             print("\n[main] Stopped by user.")
@@ -220,7 +239,7 @@ def run() -> None:
         # Manage time-based closes (Server Time)
         server_info = mt5.symbol_info_tick(SYMBOLS[0])
         if server_info:
-            manage_time_based_closes(datetime.fromtimestamp(server_info.time))
+            manage_time_based_closes(datetime.fromtimestamp(server_info.time, timezone.utc))
 
         time.sleep(30)  # scan every 30 seconds
 

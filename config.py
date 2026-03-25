@@ -3,33 +3,34 @@
 # ─────────────────────────────────────────────
 
 # ── MT5 Connection ───────────────────────────
+# Use the absolute path to your terminal64.exe
 MT5_PATH = "C:\\Program Files\\MetaTrader 5\\terminal64.exe"
 MT5_LOGIN  = 0          # 0 = use already-logged-in terminal
 MT5_PASSWORD = ""
 MT5_SERVER   = ""
 
 # ── Symbols & Timeframe ───────────────────────
-SYMBOLS   = ["EURUSD", "GBPUSD", "USDJPY", "USDCHF", "EURCHF"]
+SYMBOLS   = ["EURUSD", "GBPUSD"]
 # SYMBOLS are Gold-USD, Gold-EUR, OIL-USD, BTC-USD, ETH-USD
 # Reserve SYMBOLS = ["EURUSD", "GBPUSD", "USDJPY", "USDCHF", "EURCHF", "XAUUSD", "XAUEUR","XTIUSD"]
 TIMEFRAME = 5           # minutes (M5)
 
 # ── Risk Management ───────────────────────────
 RISK_PERCENT        = 1     # % of balance risked per trade
-MAX_TRADES_PER_PAIR = 2
+MAX_TRADES_PER_PAIR = 3
 SPREAD_LIMIT        = 20    # max spread in points
 MIN_LOT_SIZE        = 0.1   # minimum volume per trade
 MAX_LOT_SIZE        = 1.0   # maximum volume per trade
 
 # ── ATR Stops ────────────────────────────────
-ATR_SL_MULT = 1.5
-ATR_TP_MULT = 2.5
+ATR_SL_MULT = 2.0
+ATR_TP_MULT = 3.5
 
 # ── ML Model ────────────────────────────────
 MODEL_FILE        = "model.pkl"
 TRAIN_BARS        = 5000    # bars used for initial training
 RETRAIN_INTERVAL  = 4      # hours between automatic retrains
-MIN_SIGNAL_PROB   = 0.55    # minimum predicted probability to act on a signal
+MIN_SIGNAL_PROB   = 0.65    # minimum predicted probability to act on a signal
 N_ESTIMATORS      = 1000    # Random Forest trees
 RF_MAX_DEPTH      = 10
 
@@ -69,3 +70,7 @@ CLOSE_ALL_MINUTE  = 30    # Close all trades at 11:30 PM
 DAILY_PROFIT_TARGET_PCT = 15.0  # Stop trading if daily profit > 15%
 PROFIT_LOCK_THRESH      = 20.0  # Lock in profits above $20
 PROFIT_LOCK_TP_TARGET   = 20.0  # Set TP to $20 profit for others
+
+# ── Paper Trading (Strategy Tester) ──────────
+PAPER_TRADING = False  # If True, use MT5 Strategy Tester instead of Live
+TESTER_CONFIG_FILE = "tester.ini"
